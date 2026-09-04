@@ -66,9 +66,28 @@ print("\n")
 
 # search on YouTube Music, like the first found result using the authenticated client
 delay_seconds = 0.5
+batch_size = 25
+
+pending_add_tokens = []
+
+
+def flush_add_tokens() -> None:
+    """Send current batch of token to youtube music api"""
+    global pending_add_tokens
+
+    if not pending_add_tokens:
+        return
+
+    try:
+        yt_auth.edit_song_library_status(pending_add_tokens)
+        print(f"Added {len(pending_add_tokens)} songs to library in one batch")
+    except Exception as e:
+        print(f"Failed to add a batch of {len(pending_add_tokens)} songs to library: {type(e).__name__}: {e}")
+    finally:
+        pending_add_tokens = []
 
 total = len(youtube_search_strings)
-for idx, q in enumerate(youtube_search_strings, start=1):
+for idx, q in enumerate(reversed(youtube_search_strings), start=1):
     print(f"{idx}/{total}: Searching '{q}'...")
     try:
         results = yt_auth.search(q, filter="songs")
@@ -78,17 +97,26 @@ for idx, q in enumerate(youtube_search_strings, start=1):
         continue
 
     video_id = None
+    add_token = None
     for song in results:
         video_id = song.get("videoId")
         title = song.get("title", "Unknown Title")
+        feedback_tokens = song.get("feedbackTokens") or {}
+        add_token = feedback_tokens.get("add")
         if video_id:
             break
-    if not video_id:
-        print(f"No videoId found for '{q}', skipping.")
-        print()
-        continue
 
     print(f"Found videoId: {video_id}. Adding to favorites...")
+
+    if add_token:
+        pending_add_tokens.append(add_token)
+        print(f"Queued '{title}' ({video_id}) for library add")
+
+        if len(pending_add_tokens) >= batch_size:
+            flush_add_tokens()
+    else:
+        print(f"No library add token found for '{title}' ({video_id}), skipping library add")
+
     try:
         yt_auth.rate_song(video_id, LikeStatus.LIKE)
         print(f"Liked '{title}' ({video_id})")
@@ -97,3 +125,5 @@ for idx, q in enumerate(youtube_search_strings, start=1):
 
     print()
     time.sleep(delay_seconds)
+
+flush_add_tokens()
