@@ -19,71 +19,81 @@ limit = 50
 offset = 0
 spotify_liked_tracks = []
 print("Fetching saved tracks from Spotify...")
+print()
+
 while True:
     results = sp.current_user_saved_tracks(limit=limit, offset=offset)
-    items = results.get('items', [])
+    items = results.get("items", [])
     if not items:
         break
-    
-    print(f"Page {page}")
+
+    print(f"Spotify Library Page: {page}")
+    print()
 
     spotify_liked_tracks.extend(items)
     offset += len(items)
-    
-    if results.get('next') is None:
+
+    if results.get("next") is None:
         break
 
     page += 1
 
+
 for item in spotify_liked_tracks:
-    track = item['track']
+    track = item["track"]
     youtube_search_strings += [f"{track['name']} - {track['artists'][0]['name']}"]
+
 
 # YTMusic Config
 try:
-    yt_client_id = os.environ['YTMUSIC_CLIENT_ID']
-    yt_client_secret = os.environ['YTMUSIC_CLIENT_SECRET']
+    yt_client_id = os.environ["YTMUSIC_HEADERS"]
 except KeyError as missing_var:
     print(f"ERROR: {missing_var} is not set!")
     sys.exit(1)
+print()
 
-if not os.path.exists("oauth.json"):
-    setup_oauth(yt_client_id, yt_client_secret, filepath="oauth.json", open_browser=True)
+# Authenticated client
+try:
+    yt_auth = YTMusic("browser.json")
+except Exception as e:
+    print(f"ERROR: Failed to load browser.json: {e}")
+    sys.exit(1)
 
-# Authenticated client (ibrary actions)
-yt_auth = YTMusic('oauth.json', oauth_credentials=OAuthCredentials(client_id=yt_client_id, client_secret=yt_client_secret))
-
-# Unauthenticated client (searches)
-yt = YTMusic()
-
+# Head search strings
 print(youtube_search_strings[0:5])
+print("\n")
 
-# search on YouTube Music, like the first found result using the authenticated client. Rate-limited.
+
+# search on YouTube Music, like the first found result using the authenticated client
 delay_seconds = 0.5
+
 total = len(youtube_search_strings)
 for idx, q in enumerate(youtube_search_strings, start=1):
     print(f"{idx}/{total}: Searching '{q}'...")
     try:
-        results = yt.search(q)
+        results = yt_auth.search(q, filter="songs")
     except Exception as e:
-        print(f"  Search failed for '{q}':", type(e).__name__, e)
+        print(f"Search failed for '{q}': {type(e).__name__}: {e}")
+        print()
         continue
 
     video_id = None
-    for r in results:
-        if isinstance(r, dict) and r.get('videoId'):
-            video_id = r.get('videoId')
+    for song in results:
+        video_id = song.get("videoId")
+        title = song.get("title", "Unknown Title")
+        if video_id:
             break
-
     if not video_id:
-        print(f"  No videoId found for '{q}', skipping.")
+        print(f"No videoId found for '{q}', skipping.")
+        print()
         continue
 
-    print(f"  Found videoId: {video_id}. Adding to favorites...")
+    print(f"Found videoId: {video_id}. Adding to favorites...")
     try:
-        resp = yt_auth.rate_song(video_id, LikeStatus.LIKE)
-        print(f"  Liked {video_id}")
+        yt_auth.rate_song(video_id, LikeStatus.LIKE)
+        print(f"Liked '{title}' ({video_id})")
     except Exception as e:
-        print(f"  Failed to like {video_id}:", type(e).__name__, e)
+        print(f"Failed to like '{title}' ({video_id}): {type(e).__name__}: {e}")
 
+    print()
     time.sleep(delay_seconds)
